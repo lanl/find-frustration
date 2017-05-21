@@ -1,15 +1,17 @@
+/*
+find-frustration reads a graph and reports various statistics on how
+much frustration exists in the graph when treated as an Ising or QUBO
+problem.
+*/
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"math"
 	"os"
-	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/deckarep/golang-set"
@@ -19,7 +21,8 @@ import (
 // notify is used to output error messages.
 var notify *log.Logger
 
-type Empty struct{} // Zero-byte object
+ // Empty represents a zero-byte object.
+type Empty struct{}
 
 // checkError is a convenience function that aborts on error.
 func checkError(e error) {
@@ -33,103 +36,6 @@ func checkError(e error) {
 type Graph struct {
 	Vs map[string]float64    // Map from a vertex to a weight
 	Es map[[2]string]float64 // Map from an edge to a weight
-}
-
-// ReadQMASMFile returns the Ising Hamiltonian represented by a QMASM source
-// file.
-func ReadQMASMFile(r io.Reader) Graph {
-	vs := make(map[string]float64)    // Map from a vertex to a weight
-	es := make(map[[2]string]float64) // Map from an edge to a weight
-	rb := bufio.NewReader(r)
-	for {
-		// Read one line.
-		ln, err := rb.ReadString('\n')
-		if err == io.EOF {
-			break
-		}
-		checkError(err)
-
-		// Discard comments.
-		hIdx := strings.Index(ln, "#")
-		if hIdx >= 0 {
-			ln = ln[:hIdx]
-		}
-
-		// Parse the line.
-		fs := strings.Fields(ln)
-		switch len(fs) {
-		case 2:
-			// Vertex
-			v := fs[0]
-			wt, err := strconv.ParseFloat(fs[1], 64)
-			checkError(err)
-			vs[v] += wt
-		case 3:
-			// Edge, chain, or alias
-			var u, v string
-			var wt float64
-			if fs[1] == "=" || fs[1] == "<->" {
-				// Chain or alias
-				u, v = fs[0], fs[2]
-				wt = -1.0
-			} else {
-				u, v = fs[0], fs[1]
-				wt, err = strconv.ParseFloat(fs[2], 64)
-				checkError(err)
-			}
-			if u > v {
-				u, v = v, u
-			}
-			es[[2]string{u, v}] += wt
-			vs[u] += 0.0
-			vs[v] += 0.0
-		}
-	}
-	return Graph{Vs: vs, Es: es}
-}
-
-// ReadQubistFile returns the Ising Hamiltonian represented by a Qubist source
-// file.
-func ReadQubistFile(r io.Reader) Graph {
-	// Read and discard the first (header) line.
-	vs := make(map[string]float64)    // Map from a vertex to a weight
-	es := make(map[[2]string]float64) // Map from an edge to a weight
-	rb := bufio.NewReader(r)
-	ln, err := rb.ReadString('\n')
-	checkError(err)
-
-	// Process all remaining lines.
-	for {
-		// Read one line.
-		ln, err = rb.ReadString('\n')
-		if err == io.EOF {
-			break
-		}
-		checkError(err)
-
-		// Parse the line.
-		fs := strings.Fields(ln)
-		if len(fs) == 3 {
-			u, v := fs[0], fs[1]
-			wt, err := strconv.ParseFloat(fs[2], 64)
-			checkError(err)
-			if u == v {
-				// Vertex
-				vs[u] += wt
-			} else {
-				// Edge
-				if u > v {
-					u, v = v, u
-				}
-				es[[2]string{u, v}] += wt
-				vs[u] += 0.0
-				vs[v] += 0.0
-			}
-		} else {
-			notify.Fatalf("Failed to parse Qubist line %q", strings.TrimSpace(ln))
-		}
-	}
-	return Graph{Vs: vs, Es: es}
 }
 
 // spanningTree returns a list of edges in a spanning tree and a list of
@@ -398,107 +304,6 @@ func (g Graph) isFrustrated(p []string) bool {
 		}
 	}
 	return afm&1 == 1
-}
-
-func OutputResults(w io.Writer, g Graph, ecs [][][2]string) {
-	// Convert the edges back to paths for a more readable presentation.
-	// Determine which paths are frustrated cycles.
-	ps := make([][]string, len(ecs))
-	isFrust := make([]bool, len(ecs))
-	for i, ec := range ecs {
-		ps[i] = g.edgesToPath(ec)
-		isFrust[i] = g.isFrustrated(ps[i])
-	}
-
-	// Output each cycle preceded by whether it is frustrated or not.  As
-	// we go along, keep track of all vertices that appear within a
-	// frustrated cycle, and tally the number of frustrated cycles
-	// encountered.
-	fvs := make(map[string]Empty, len(g.Vs))
-	nfcs := 0 // Number of frustrated cycles
-	for i, p := range ps {
-		f := isFrust[i]
-		if f {
-			fmt.Fprintf(w, "FC  ")
-			nfcs++
-		} else {
-			fmt.Fprintf(w, "NFC ")
-		}
-		for _, v := range p {
-			fmt.Fprintf(w, " %s", v)
-			if f {
-				fvs[v] = Empty{}
-			}
-		}
-		fmt.Fprintln(w, "")
-	}
-
-	// Tally the number of times each vertex appears in a frustrated cycle
-	// and in a non-frustrated cycle.
-	fVerts := make(map[string]int)
-	nfVerts := make(map[string]int)
-	for i, p := range ps {
-		for _, v := range p {
-			if isFrust[i] {
-				fVerts[v]++
-			} else {
-				nfVerts[v]++
-			}
-		}
-	}
-
-	// Output each vertex, categorized and tallied.  Keep track of the
-	// number of vertices that are more frustrated than not frustrated.
-	nfvs := 0 // Number of frustrated vertices
-	for v, t := range fVerts {
-		if t > nfVerts[v] {
-			fmt.Fprintf(w, "FV   %d %d | %s\n", t, t-nfVerts[v], v)
-			nfvs++
-		}
-	}
-	for v, t := range nfVerts {
-		if t > fVerts[v] {
-			fmt.Fprintf(w, "NFV  %d %d | %s\n", t, t-fVerts[v], v)
-		}
-	}
-
-	// Tally the number of times each edge appears in a frustrated cycle
-	// and in a non-frustrated cycle.
-	fEdges := make(map[[2]string]int)
-	nfEdges := make(map[[2]string]int)
-	for i, p := range ps {
-		for j, v1 := range p {
-			v2 := p[(j+1)%len(p)]
-			if v1 > v2 {
-				v1, v2 = v2, v1
-			}
-			e := [2]string{v1, v2}
-			if isFrust[i] {
-				fEdges[e]++
-			} else {
-				nfEdges[e]++
-			}
-		}
-	}
-
-	// Output each edge, categorized and tallied.
-	nfes := 0 // Number of frustrated edges
-	for e, t := range fEdges {
-		if t > nfEdges[e] {
-			fmt.Fprintf(w, "FE   %d %d | %s %s\n", t, t-nfEdges[e], e[0], e[1])
-			nfes++
-		}
-	}
-	for e, t := range nfEdges {
-		if t > fEdges[e] {
-			fmt.Fprintf(w, "NFE  %d %d | %s %s\n", t, t-fEdges[e], e[0], e[1])
-		}
-	}
-
-	// Output some cycle, edge, and vertex statistics.
-	fmt.Fprintf(w, "#FC  %d / %d = %f\n", nfcs, len(ps), float64(nfcs)/float64(len(ps)))
-	fmt.Fprintf(w, "#FE  %d / %d = %f\n", nfes, len(g.Es), float64(nfes)/float64(len(g.Es)))
-	fmt.Fprintf(w, "#FV  %d / %d = %f\n", nfvs, len(g.Vs), float64(nfvs)/float64(len(g.Vs)))
 }
 
 func main() {
