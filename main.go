@@ -311,7 +311,7 @@ func main() {
 	var err error
 	notify = log.New(os.Stderr, os.Args[0]+": ", 0)
 	inFmt := ""
-	flag.StringVar(&inFmt, "format", "qubist", `input file format: "qubist" (default) or "qmasm"`)
+	flag.StringVar(&inFmt, "format", "qubist", `input file format: "qubist" (default), "qubo", or "qmasm"`)
 	flag.StringVar(&inFmt, "f", "qubist", "shorthand for --format")
 	outFile := ""
 	flag.StringVar(&outFile, "output", "", "output file name (default: standard output)")
@@ -349,6 +349,8 @@ func main() {
 		g = ReadQMASMFile(r)
 	case "qubist":
 		g = ReadQubistFile(r)
+	case "qubo":
+		g = ReadQUBOFile(r)
 	default:
 		notify.Fatalf("Unrecognized input format %q", inFmt)
 	}

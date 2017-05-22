@@ -106,3 +106,66 @@ func ReadQubistFile(r io.Reader) Graph {
 	}
 	return Graph{Vs: vs, Es: es}
 }
+
+// ReadQUBOFile returns the Ising Hamiltonian represented by a QUBO source file.
+func ReadQUBOFile(r io.Reader) Graph {
+	// Read a list of edges and vertices in QUBO format.
+	vs := make(map[string]float64)    // Map from a vertex to a weight
+	es := make(map[[2]string]float64) // Map from an edge to a weight
+	rb := bufio.NewReader(r)
+	for {
+		// Read one line.
+		ln, err := rb.ReadString('\n')
+		if err == io.EOF {
+			break
+		}
+		checkError(err)
+
+		// Parse the line.
+		fs := strings.Fields(ln)
+		if len(fs) == 0 {
+			continue // Blank line
+		}
+		switch fs[0] {
+		case "c":
+			continue // Comment
+		case "p":
+			if len(fs) != 6 || fs[1] != "qubo" {
+				notify.Fatalf("Failed to parse QUBO line %q", strings.TrimSpace(ln))
+			}
+			continue // Don't bother validating the problem size.
+		}
+		if len(fs) != 3 {
+			notify.Fatalf("Failed to parse QUBO line %q", strings.TrimSpace(ln))
+		}
+		u, v := fs[0], fs[1]
+		wt, err := strconv.ParseFloat(fs[2], 64)
+		checkError(err)
+		if u == v {
+			// Vertex
+			vs[u] += wt
+		} else {
+			// Edge
+			if u > v {
+				u, v = v, u
+			}
+			es[[2]string{u, v}] += wt
+			vs[u] += 0.0
+			vs[v] += 0.0
+		}
+
+	}
+
+	// Convert from a QUBO problem to an Ising problem and return that.
+	for i, wt := range vs {
+		vs[i] = wt / 2
+	}
+	for ij, wt := range es {
+		i, j := ij[0], ij[1]
+		wt4 := wt / 4
+		es[ij] = wt4
+		vs[i] += wt4
+		vs[j] += wt4
+	}
+	return Graph{Vs: vs, Es: es}
+}
