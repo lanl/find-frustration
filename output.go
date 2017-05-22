@@ -34,7 +34,7 @@ func outputVertices(w io.Writer, g Graph, ps [][]string, isFrust []bool) {
 		}
 	}
 	for v, t := range nfVerts {
-		if t > fVerts[v] {
+		if t >= fVerts[v] {
 			fmt.Fprintf(w, "NFV  %d %d | %s\n", t, t-fVerts[v], v)
 		}
 	}
@@ -73,7 +73,7 @@ func outputEdges(w io.Writer, g Graph, ps [][]string, isFrust []bool) {
 		}
 	}
 	for e, t := range nfEdges {
-		if t > fEdges[e] {
+		if t >= fEdges[e] {
 			fmt.Fprintf(w, "NFE  %d %d | %s %s\n", t, t-fEdges[e], e[0], e[1])
 		}
 	}
