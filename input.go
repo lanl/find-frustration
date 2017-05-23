@@ -5,10 +5,25 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"io"
 	"strconv"
 	"strings"
 )
+
+// quboToIsing converts a QUBO problem to an Ising problem.
+func quboToIsing(vs map[string]float64, es map[[2]string]float64) {
+	for i, wt := range vs {
+		vs[i] = wt / 2
+	}
+	for ij, wt := range es {
+		i, j := ij[0], ij[1]
+		wt4 := wt / 4
+		es[ij] = wt4
+		vs[i] += wt4
+		vs[j] += wt4
+	}
+}
 
 // ReadQMASMFile returns the Ising Hamiltonian represented by a QMASM source
 // file.
@@ -157,15 +172,77 @@ func ReadQUBOFile(r io.Reader) Graph {
 	}
 
 	// Convert from a QUBO problem to an Ising problem and return that.
-	for i, wt := range vs {
-		vs[i] = wt / 2
+	quboToIsing(vs, es)
+	return Graph{Vs: vs, Es: es}
+}
+
+// ReadBqpjsonFile returns the Ising Hamiltonian represented by a bqpjson
+// source file (cf. https://github.com/lanl-ansi/bqpjson).
+func ReadBqpjsonFile(r io.Reader) Graph {
+	// Define the contents of a linear term.
+	type LinearTerm struct {
+		V      int     `json:"id"`    // Variable ID
+		Weight float64 `json:"coeff"` // Variable weight
 	}
-	for ij, wt := range es {
-		i, j := ij[0], ij[1]
-		wt4 := wt / 4
-		es[ij] = wt4
-		vs[i] += wt4
-		vs[j] += wt4
+
+	// Define the contents of a quadratic term.
+	type QuadraticTerm struct {
+		U      int     `json:"id_tail"` // First variable ID
+		V      int     `json:"id_head"` // Second variable ID
+		Weight float64 `json:"coeff"`   // Edge weight
 	}
+
+	// Specify only the parts of the bqpjson format in which we're
+	// interested.
+	type Bqpjson struct {
+		VarDomain string          `json:"variable_domain"` // "spin" or "boolean"
+		Scale     float64         `json:"scale"`           // Scale factor for all coefficients
+		Offset    float64         `json:"offset"`          // Offset value for all coefficients
+		LinTerms  []LinearTerm    `json:"linear_terms"`    // List of linear terms
+		QuadTerms []QuadraticTerm `json:"quadratic_terms"` // List of quadratic terms
+	}
+
+	// Read the graph description in bqpjson format.
+	var desc Bqpjson
+	dec := json.NewDecoder(r)
+	err := dec.Decode(&desc)
+	checkError(err)
+
+	// Extract a list of edges and a list of vertices.
+	vs := make(map[string]float64)    // Map from a vertex to a weight
+	es := make(map[[2]string]float64) // Map from an edge to a weight
+	for _, lt := range desc.LinTerms {
+		vs[strconv.Itoa(lt.V)] += lt.Weight
+	}
+	for _, qt := range desc.QuadTerms {
+		u := strconv.Itoa(qt.U)
+		v := strconv.Itoa(qt.V)
+		if u > v {
+			u, v = v, u
+		}
+		es[[2]string{u, v}] += qt.Weight
+		vs[u] += 0.0
+		vs[v] += 0.0
+	}
+
+	// Multiply all weights by the scale parameter then add the offset
+	// parameter.
+	for v, wt := range vs {
+		vs[v] = wt*desc.Scale + desc.Offset
+	}
+	for v, wt := range es {
+		es[v] = wt*desc.Scale + desc.Offset
+	}
+
+	// Convert from QUBO to Ising if the problem was specified as QUBO.
+	switch desc.VarDomain {
+	case "boolean":
+		quboToIsing(vs, es)
+	case "spin":
+	default:
+		notify.Fatalf("Unrecognized variable_domain %q", desc.VarDomain)
+	}
+
+	// Return the resulting graph.
 	return Graph{Vs: vs, Es: es}
 }
