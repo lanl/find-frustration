@@ -84,12 +84,16 @@ func main() {
 		notify.Fatalf("Unrecognized input format %q", inFmt)
 	}
 
-	// Acquire a list of basic cycles and from that a list of elementary
-	// cycles.
+	// Acquire a list of basic cycles and from that, if requested, a list
+	// of elementary cycles.
 	bPath := g.baseCyclePaths()
 	bcs := make([][][2]string, len(bPath))
 	for i, p := range bPath {
 		bcs[i] = g.pathToEdges(p)
+	}
+	if len(bcs) == 0 {
+		notify.Print("Graph is acyclic; no frustration can exist")
+		os.Exit(0)
 	}
 	fmt.Fprintf(w, "#BCS %d\n", len(bcs))
 	var ecs [][][2]string
