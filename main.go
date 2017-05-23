@@ -99,6 +99,7 @@ func main() {
 	var ecs [][][2]string
 	if *allCycs {
 		ecs = g.elementaryCycles(bcs)
+		fmt.Fprintf(w, "#ECS %d\n", len(ecs))
 	} else {
 		ecs = bcs
 	}
